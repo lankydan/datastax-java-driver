@@ -46,7 +46,6 @@ public class CassandraConfig {
     final Map<String, Object> replication = new HashMap<>();
     replication.put("class", "SimpleStrategy");
     replication.put("replication_factor", 1);
-    SchemaBuilder.createTable().
     session.execute(createKeyspace(keyspace).ifNotExists().with().replication(replication));
     session.execute("USE " + keyspace);
 //    String[] statements = split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");

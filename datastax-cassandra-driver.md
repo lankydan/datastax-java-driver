@@ -53,7 +53,6 @@ public class CassandraConfig {
              .build();
   }
 
-  // @Bean(destroyMethod = "close")
   @Bean
   public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String keyspace) throws IOException {
     final Session session = cluster.connect(keyspace);
@@ -61,9 +60,14 @@ public class CassandraConfig {
     return session;
   }
 
-  private void setupKeyspace(Session session) throws IOException {
-    String[] statements = split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");
-    Arrays.stream(statements).map(statement -> normalizeSpace(statement) + ";").forEach(session::execute);
+  private void setupKeyspace(Session session, String keyspace) throws IOException {
+    final Map<String, Object> replication = new HashMap<>();
+    replication.put("class", "SimpleStrategy");
+    replication.put("replication_factor", 1);
+    session.execute(createKeyspace(keyspace).ifNotExists().with().replication(replication));
+    session.execute("USE " + keyspace);
+//    String[] statements = split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");
+//    Arrays.stream(statements).map(statement -> normalizeSpace(statement) + ";").forEach(session::execute);
   }
 
   @Bean
@@ -76,11 +80,86 @@ public class CassandraConfig {
 ```
 There is a bit more core here when compared to a similar setup using Spring Data (this class isn't even needed when combined with Spring Boot's auto-configuration) but class itself is pretty simple. The basic setup of the `Cluster` and `Session` beans shown here is the bare minimum required for the driver to work and will likely remain the same for any application you write, with more methods provided to add any additional configuration to make it suitable for your usecase.
 
-Using values from `application.properties` we set the host address, cluster name and port of the `Cluster`. The `Cluster` is then used to create a `Session` for a particular keyspace on the Cassandra instance, again taken from the properties file.
+Using values from `application.properties` we set the host address, cluster name and port of the `Cluster`. The `Cluster` is then used to create a `Session`. There are two options to choose from when doing this, setting the default keyspace or not. If you want to set the default keyspace then all you need to do is use the below code instead.
+```java
+@Bean
+public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String keyspace) throws IOException {
+  final Session session = cluster.connect(keyspace);
+  // any other setup
+  return session;
+}
+```
+The keyspace is passed into the `connect` method which will create a `Session` and then execute `USE <keyspace>` thus setting the default keyspace. This relies of the keyspace existing before creating the session, if it does not it will fail when executing the `USE` statement.
 
+If you do not know if the keyspace exists at startup or know that you definately want to create it dynamically based on the keyspace value from the properties file, then you will need to call `connect` without specifying the keyspace. We will then need to create it ourselves so we actually have something to use. To do this we make use of the `createKeyspace` method provided by `SchemaBuilder`. Below is the CQL statement to create the keyspace.
+```sql
+CREATE KEYSPACE IF NOT EXISTS <keyspace> WITH REPLICATION = { 'class':'SimpleStrategy', 'replication_factor':1 };
+```
+I have also added the keyspace code below again as its a bit far away now.
+```java
+private void setupKeyspace(Session session, String keyspace) throws IOException {
+  final Map<String, Object> replication = new HashMap<>();
+  replication.put("class", "SimpleStrategy");
+  replication.put("replication_factor", 1);
+  session.execute(createKeyspace(keyspace).ifNotExists().with().replication(replication));
+  session.execute("USE " + keyspace);
+}
+```
+The `SchemaBuilder` is nice and easy to use and looks very similar to the CQL as you go through it. We add a `ifNotExists` clause and set the replication factor by first calling `with` and then passing a `Map<String, Object>` into the `replicationMethod`. This map needs to contain the class and replication factor, basically use the keys shown here but change the mapped values to whatever you need them to be. Don't forget to `execute` the statement and then tell the session to use the keyspace that was just created. Unfortunately there isn't a nicer way to set the default keyspace manually and a `USE` statement must be called instead.
+
+Following on from the two previous options regarding setting the default keyspace. If we choose to not set the default keyspace at all, then we need to prepend a keyspace onto each table we create and for every query that is executed. It isn't too hard to do as Datastax provides ways to add keyspace names to queries as well as onto entities for mapping. I won't go into this subject any further, but know that not setting the keyspace will not prevent your application from working if you have setup everything else correctly.
+
+Once the keyspace is set we can get around to creating the tables. There are two possible ways to do this. One, execute some CQL statements, whether they are strings in your Java code or read from a external CQL script. Two, use the `SchemaBuilder` to create them.
+
+Let's look at executing CQL statements first, or more precisely executing them from a CQL file. You might have noticed that I left some commented out code in the original example, when uncommented that code will read from a file named `setup.cql`, read out a single CQL statement, execute it and then move onto the next statement. Here it is again.
+```java
+String[] statements = split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");
+Arrays.stream(statements).map(statement -> normalizeSpace(statement) + ";").forEach(session::execute);
+```
+Below is the CQL contained in the file to create the Cassandra table.
+```sql
+CREATE TABLE IF NOT EXISTS people_by_country(
+  country TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  id UUID,
+  age INT,
+  profession TEXT,
+  salary INT,
+  PRIMARY KEY((country), first_name, last_name, id)
+);
+```
+The primary key consists of the `country`, `first_name`, `last_name` and `id` field. The partition key consists of just the `country` field and the clustering columns are the remaining keys in the key, `id` is only included for uniqueness as you can obviously have people with the same names. I go into the topic of primary keys in much more depth in my earlier post, [Getting started with Spring Data Cassandra](URL).
+
+This code makes use of the `commons-io` and `commons-lang3` dependencies. If we are not executing CQL in this way, then these dependencies might not be needed and can be removed.
+
+What about using the `SchemaBuilder`? I haven't included any code to create a table in the original snippet because I was playing around and trying to figure out the nicest place to put it, for now I have stuck it in the repository but I'm still not convinced thats the perfect place for it. Anyway, I will paste the code here so we can look at in now and then we can skip over it later when it reappears.
+```java
+private void createTable(Session session) {
+  session.execute(
+      SchemaBuilder.createTable(TABLE)
+          .ifNotExists()
+          .addPartitionKey("country", text())
+          .addClusteringColumn("first_name", text())
+          .addClusteringColumn("last_name", text())
+          .addClusteringColumn("id", uuid())
+          .addColumn("age", cint())
+          .addColumn("profession", text())
+          .addColumn("salary", cint()));
+}
+```
+This matches up quite nicely with the CQL shown above. We are able to define the different column types using `addPartitionKey` and `addClusteringColumn` to create our primary key and `addColumn` for the standard fields. There are plenty of other methods, such as `addStaticColumn` and `withOptions` allowing you to then call `clusteringOrder` to define the sorting direction of your clustering columns. The order that you call these methods is very important as the partition key and clustering columns we be created in the order which their respective methods are called. Datastax also provide the `DataType` class to make defining the column types easier `text` matches to `TEXT` and `cint` matches to `INT`. As with the last time we use `SchemaBuilder`, once we are happy with the table design we need to `execute` it.
+
+Onto the `MappingManager`, the snippet to create the bean is below.
+```java
+@Bean
+public MappingManager mappingManager(Session session) {
+  final PropertyMapper propertyMapper = new DefaultPropertyMapper().setNamingStrategy(new DefaultNamingStrategy(LOWER_CAMEL_CASE, LOWER_SNAKE_CASE));
+  final MappingConfiguration configuration = MappingConfiguration.builder().withPropertyMapper(propertyMapper).build();
+  return new MappingManager(session, configuration);
+}
+```
 The `MappingManager` bean comes from the `cassandra-driver-mapping` dependency and will mapping from a `ResultSet` to an entity (which we will look at later). For now we just need to create the bean and if we aren't happy with the default naming strategy of converting Java camel case to all lowercase with no separators in Cassandra we will need to set our own. To do this we can pass in a `DefaultNamingStrategy` to define the case that we are using within our Java classes and what we are using in Cassandra. Since in Java it is typical to use camel case we pass in `LOWER_CAMEL_CASE` and since I like to use snake case in Cassandra we can use `LOWER_SNAKE_CASE` (these are found in the `NamingConventions` class). The reference to lower specifies the case of the first character in a string, so `LOWER_CAMEL_CASE` represents `firstName` and `UPPER_CAMEL_CASE` represents `FirstName`. `DefaultPropertyMapper` comes with extra methods for more specific configuration but `MappingConfiguration` only has one job of taking in a `PropertyMapper` to be passed to a `MappingManager`.
-
----------------- SORT OUT THE CREATION OF THE KEYSPACE AND TABLES ---------------------------------
 
 The next thing we should look at is the entity that will be persisted to and retrieved from Cassandra saving us the effort of manually setting values for inserts and converting results from reads. The Datastax driver provides us with a relatively simple way to do just that by using annotations to mark properties like the name of the table it is mapping to, which field matches to what Cassandra columns and which fields does the primary key comprise of.
 ```java
@@ -122,7 +201,7 @@ public class Person {
   // equals, hashCode, toString
 }
 ```
-This entity represents the `people_by_country` table as denoted by the `@Table`. Below is the CQL that you would execute to create the matching Cassandra table.
+This entity represents the `people_by_country` table as denoted by the `@Table`. I have put the CQL of the table below again for reference.
 ```sql
 CREATE TABLE IF NOT EXISTS people_by_country(
   country TEXT,
@@ -135,9 +214,7 @@ CREATE TABLE IF NOT EXISTS people_by_country(
   PRIMARY KEY((country), first_name, last_name, id)
 );
 ```
-The primary key consists of the `country`, `first_name`, `last_name` and `id` field. The partition key consists of just the `country` field and the clustering columns are the remaining keys in the key, `id` is only included for uniqueness as you can obviously have people with the same names. I go into the topic of primary keys in much more depth in my earlier post, [Getting started with Spring Data Cassandra](URL).
-
-Back to the Java code. I already mentioned the `@Table` annotation where we must specify the name of the table the entity represents, which also comes with various other options depending on your requirements, such as `keyspace` if you don't want to use the default keyspace the `Session` bean is configured to use and `caseSensitiveTable` which is self explanatory.
+The `@Table` annotation must specify the name of the table the entity represents, it also comes with various other options depending on your requirements, such as `keyspace` if you don't want to use the default keyspace the `Session` bean is configured to use and `caseSensitiveTable` which is self explanatory.
 
 What about he primary key? As touched on above, a primary key consists of a partition key that itself contains one or more columns and/or clustering columns(s). To match up to the Cassandra table defined above we added the `@PartitionKey` and `@ClusteringColumn` annotations to the required fields. Both of the annotations have one property, `value` which specifies the order which the column appears in the primary key. The default value is `0` which is why some fields do not include a value.
 
