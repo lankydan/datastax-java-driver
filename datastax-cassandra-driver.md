@@ -1,4 +1,6 @@
-I'm back with more Cassandra and Java integration today this time focusing on using the Datastax Java driver rather than Spring Data Cassandra which I have already written about quite a lot. The Datastax driver is actually used by Spring Data to interact with Cassandra but comes with some extra goodies built on top of it. But we don't want any of these today! We are going to use the Datastax driver directly and compare it to Spring Data when appropriate.
+I'm back with more Cassandra and Java integration today this time focusing on using the Datastax Java driver rather than Spring Data Cassandra which I have already written about quite a lot. The Datastax driver is actually used by Spring Data to interact with Cassandra but comes with some extra goodies built on top of it. But we don't want any of these today! We are going to use the Datastax driver directly and at the end of the post once we have seen how use it we will compare it against Spring Data.
+
+This post makes the assumption that you are already familiar with Cassandra and possibly Spring Data Cassandra. Since I have already written quite a few posts around this subject I have only brushed over how Cassandra works where context is required. If you do not have this background information I recommend reading [Getting started with Spring Data Cassandra](URL) where I obviously talked about using Spring Data Cassandra but also went into more thorough explanations of how Cassandra works than I do in this post. There is also the [Datastax Academy](URL) which provide some very useful resources for learning how to use Cassandra yourself.
 
 First things first, dependencies.
 ```xml
@@ -35,7 +37,7 @@ First things first, dependencies.
 
 </dependencies>
 ```
-As always I am using Spring Boot, just because we are depriving ourselves of Spring Data doesn't mean we need to go completely cold turkey from all Spring libraries. The Datastax related dependencies here are `cassandra-driver-core` and `cassandra-driver-mapping`. `cassandra-driver-core`, as the name suggests provides the core functionality to interact with Cassandra such as setting up a session and writing queries. `cassandra-driver-mapping` is not required to query Cassandra but does provide some object mapping, inconjunction with the core driver it will now serve as an ORM rather than a way to execute CQL statements.
+As always I am using Spring Boot, just because we are depriving ourselves of Spring Data doesn't mean we need to go completely cold turkey from all Spring libraries. The Datastax related dependencies here are `cassandra-driver-core` and `cassandra-driver-mapping`. `cassandra-driver-core`, as the name suggests provides the core functionality to interact with Cassandra such as setting up a session and writing queries. `cassandra-driver-mapping` is not required to query Cassandra but does provide some object mapping, inconjunction with the core driver it will now serve as an ORM rather than only allowing us execute CQL statements.
 
 We now have our dependencies sorted, the next step is to get connected to Cassandra so that we can actually start quering it.
 ```java
@@ -78,9 +80,9 @@ public class CassandraConfig {
   }
 }
 ```
-There is a bit more core here when compared to a similar setup using Spring Data (this class isn't even needed when combined with Spring Boot's auto-configuration) but class itself is pretty simple. The basic setup of the `Cluster` and `Session` beans shown here is the bare minimum required for the driver to work and will likely remain the same for any application you write, with more methods provided to add any additional configuration to make it suitable for your usecase.
+There is a bit more core here when compared to a similar setup using Spring Data (this class isn't even needed when combined with Spring Boot's auto-configuration) but the class itself is pretty simple. The basic setup of the `Cluster` and `Session` beans shown here is the bare minimum required for the application to work and will likely remain the same for any application you write. More methods are provided so you can add any additional configuration to make them suitable for your usecase.
 
-Using values from `application.properties` we set the host address, cluster name and port of the `Cluster`. The `Cluster` is then used to create a `Session`. There are two options to choose from when doing this, setting the default keyspace or not. If you want to set the default keyspace then all you need to do is use the below code instead.
+By using values from `application.properties` we set the host address, cluster name and port of the `Cluster`. The `Cluster` is then used to create a `Session`. There are two options to choose from when doing this, setting the default keyspace or not. If you want to set the default keyspace then all you need to do is use the below code instead.
 ```java
 @Bean
 public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String keyspace) throws IOException {
@@ -89,7 +91,7 @@ public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String k
   return session;
 }
 ```
-The keyspace is passed into the `connect` method which will create a `Session` and then execute `USE <keyspace>` thus setting the default keyspace. This relies of the keyspace existing before creating the session, if it does not it will fail when executing the `USE` statement.
+The keyspace is passed into the `connect` method which will create a `Session` and then execute `USE <keyspace>` thus setting the default keyspace. This relies on the keyspace existing before creating the session, if it does not it will fail when executing the `USE` statement.
 
 If you do not know if the keyspace exists at startup or know that you definately want to create it dynamically based on the keyspace value from the properties file, then you will need to call `connect` without specifying the keyspace. We will then need to create it ourselves so we actually have something to use. To do this we make use of the `createKeyspace` method provided by `SchemaBuilder`. Below is the CQL statement to create the keyspace.
 ```sql
@@ -233,8 +235,13 @@ public class PersonRepository {
   private static final String TABLE = "people_by_country";
 
   public PersonRepository(MappingManager mappingManager) {
+    createTable(mappingManager.getSession());
     this.mapper = mappingManager.mapper(Person.class);
     this.session = mappingManager.getSession();
+  }
+
+  private void createTable(Session session) {
+    // use SchemaBuilder to create table
   }
 
   public Person find(String country, String firstName, String secondName, UUID id) {
@@ -338,4 +345,20 @@ And thats a wrap.
 
 I will try to write some follow up posts to this in the future as there are a few more interesting things that we can do with the Datastax driver that we haven't gone through in this post. What we have covered here should be enough to make your first steps in using the driver and start querying Cassandra from your application.
 
-Before we go I would like to make a few comparisons between the Datastax driver and Spring Data Cassandra.
+Before we go I would like to make a few comparisons between the Datastax driver and Spring Data Cassandra. 
+
+Support for creating your tables is lacking in the Datastax driver (in my opinion) compared to Spring Data Cassandra. The fact that Spring Data is able to create your tables soley based on your entities removes all this extra effort to basically rewrite what you have already written. Obviously if you don't want to use entity annotations then the difference goes away as you will need to manually create the tables in both Datastax and Spring Data.
+
+The way the entities are designed and the annotations used are also quite different. This point is tied closely to the previous point I made. Because Spring Data can create your tables for you, it has a greater need for more precise annotations that allow you to specify the design of your tables, such as the sorting order of clustering columns.
+
+Spring Data also provides better support for standard queries such as `findAll` and the inserting of a collection of entities. Obviously this is not exactly the end of the world and implementing these will take very little effort but this pretty much sums up the main difference between the Datastax driver and Spring Data Cassandra.
+
+Spring Data is just easier to use. I don't think there is really anything else to say on the subject. Since Spring Data Cassandra is built upon the Datastax driver it can obviously do everything the driver can and if anything that you require is missing, then you can just access the Datastax classes directly and do what you need. But the convenience that Spring Data provides shouldn't be looked over and I don't think I have even covered some of the more helpful parts that it provides since this post is only covering the basics. Don't even get me started on how much easier it is once you make use of Spring Boot's auto-configuration and the inferred queries that Cassandra repositories generate for you.
+
+I should stop... This is turning into a rant.
+
+In conclusion using the Datastax driver to connect and query a Cassandra database is relatively straight forward. Establish a connection to Cassandra, create the entities that you need and write the repositories that make use of the former, then you have everything that you need to get going. We also compared the Datastax driver to Spring Data Cassandra which pretty much comes down to, Datastax will do what you need but Spring Data makes it easier.
+
+The code used in this post can be found on my [GitHub](URL).
+
+If you found this post helpful and want o keep up to date with my latest posts, then you can follow me on twitter at [@LankyDanDev](URL).
