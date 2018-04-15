@@ -10,11 +10,9 @@ import com.datastax.driver.mapping.annotations.Table;
 @Table(name = "people_by_country")
 public class Person {
 
-  @PartitionKey
-  private String country;
+  @PartitionKey private String country;
 
-  @ClusteringColumn
-  private String firstName;
+  @ClusteringColumn private String firstName;
 
   @ClusteringColumn(1)
   private String lastName;
@@ -26,11 +24,16 @@ public class Person {
   private String profession;
   private int salary;
 
-  private Person() {
+  private Person() {}
 
-  }
-
-  public Person(String country, String firstName, String lastName, UUID id, int age, String profession, int salary) {
+  public Person(
+      String country,
+      String firstName,
+      String lastName,
+      UUID id,
+      int age,
+      String profession,
+      int salary) {
     this.country = country;
     this.firstName = firstName;
     this.lastName = lastName;
@@ -98,16 +101,16 @@ public class Person {
 
   @Override
   public boolean equals(Object o) {
-    if(this == o) return true;
-    if(o == null || getClass() != o.getClass()) return false;
-    Person person = (Person)o;
-    return age == person.age &&
-             salary == person.salary &&
-             Objects.equals(country, person.country) &&
-             Objects.equals(firstName, person.firstName) &&
-             Objects.equals(lastName, person.lastName) &&
-             Objects.equals(id, person.id) &&
-             Objects.equals(profession, person.profession);
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Person person = (Person) o;
+    return age == person.age
+        && salary == person.salary
+        && Objects.equals(country, person.country)
+        && Objects.equals(firstName, person.firstName)
+        && Objects.equals(lastName, person.lastName)
+        && Objects.equals(id, person.id)
+        && Objects.equals(profession, person.profession);
   }
 
   @Override
@@ -117,14 +120,25 @@ public class Person {
 
   @Override
   public String toString() {
-    return "Person{" +
-             "country='" + country + '\'' +
-             ", firstName='" + firstName + '\'' +
-             ", lastName='" + lastName + '\'' +
-             ", id=" + id +
-             ", age=" + age +
-             ", profession='" + profession + '\'' +
-             ", salary=" + salary +
-             '}';
+    return "Person{"
+        + "country='"
+        + country
+        + '\''
+        + ", firstName='"
+        + firstName
+        + '\''
+        + ", lastName='"
+        + lastName
+        + '\''
+        + ", id="
+        + id
+        + ", age="
+        + age
+        + ", profession='"
+        + profession
+        + '\''
+        + ", salary="
+        + salary
+        + '}';
   }
 }

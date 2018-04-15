@@ -24,18 +24,19 @@ public class CassandraConfig {
 
   @Bean
   public Cluster cluster(
-    @Value("${cassandra.host:127.0.0.1}") String host, @Value("${cassandra.cluster.name:cluster}") String clusterName,
-    @Value("${cassandra.port:9042}") int port) {
+      @Value("${cassandra.host:127.0.0.1}") String host,
+      @Value("${cassandra.cluster.name:cluster}") String clusterName,
+      @Value("${cassandra.port:9042}") int port) {
     return Cluster.builder()
-             .addContactPoint(host)
-             .withPort(port)
-             .withClusterName(clusterName)
-             .build();
+        .addContactPoint(host)
+        .withPort(port)
+        .withClusterName(clusterName)
+        .build();
   }
 
-  //   @Bean(destroyMethod = "close")
   @Bean
-  public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String keyspace) throws IOException {
+  public Session session(Cluster cluster, @Value("${cassandra.keyspace}") String keyspace)
+      throws IOException {
     //    final Session session = cluster.connect(keyspace);
     final Session session = cluster.connect();
     setupKeyspace(session, keyspace);
@@ -48,14 +49,19 @@ public class CassandraConfig {
     replication.put("replication_factor", 1);
     session.execute(createKeyspace(keyspace).ifNotExists().with().replication(replication));
     session.execute("USE " + keyspace);
-//    String[] statements = split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");
-//    Arrays.stream(statements).map(statement -> normalizeSpace(statement) + ";").forEach(session::execute);
+    //    String[] statements =
+    // split(IOUtils.toString(getClass().getResourceAsStream("/cql/setup.cql")), ";");
+    //    Arrays.stream(statements).map(statement -> normalizeSpace(statement) +
+    // ";").forEach(session::execute);
   }
 
   @Bean
   public MappingManager mappingManager(Session session) {
-    final PropertyMapper propertyMapper = new DefaultPropertyMapper().setNamingStrategy(new DefaultNamingStrategy(LOWER_CAMEL_CASE, LOWER_SNAKE_CASE));
-    final MappingConfiguration configuration = MappingConfiguration.builder().withPropertyMapper(propertyMapper).build();
+    final PropertyMapper propertyMapper =
+        new DefaultPropertyMapper()
+            .setNamingStrategy(new DefaultNamingStrategy(LOWER_CAMEL_CASE, LOWER_SNAKE_CASE));
+    final MappingConfiguration configuration =
+        MappingConfiguration.builder().withPropertyMapper(propertyMapper).build();
     return new MappingManager(session, configuration);
   }
 }
